@@ -1,0 +1,34 @@
+{
+  "name": "toolkit-deploy",
+  "env": {
+      "DATABASE_URL": {
+          "description": "URL for your Postgres database"
+      },
+      "COHERE_API_KEY": {
+          "description": "Your Cohere API key"
+      },
+      "INSTALL_COMMUNITY_DEPS": {
+          "description": "Whether to enable community features true/false"
+      }
+  },
+  "hooks": {
+        "prebuild": {
+            "commands": [
+                "gcloud auth configure-docker"
+            ]
+        },
+        "postcreate": {
+            "commands": [
+                "chmod +x ./gcp_postcreate_hook.sh",
+                "./gcp_postcreate_hook.sh"
+            ]
+        }
+  },
+  "options": {
+      "allow-unauthenticated": true,
+      "memory": "12288Mi",
+      "cpu": "4",
+      "port": 4000,
+      "max-instances": 2
+  }
+}
