@@ -13,18 +13,26 @@ USER root
 RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
-ENV ML_RUNTIME_EDITION="ML Runtime with JupyterLab Edition" \
+ENV ML_RUNTIME_EDITION="ML Runtime for Cohere Toolkit" \
     ML_RUNTIME_SHORT_VERSION="1" \
     ML_RUNTIME_MAINTENANCE_VERSION="0" \
-    ML_RUNTIME_FULL_VERSION="1.0" \
-    ML_RUNTIME_DESCRIPTION="ML Runtime to accompany Cohere Toolkit"
+    ML_RUNTIME_FULL_VERSION="1.0.0" \
+    ML_RUNTIME_DESCRIPTION="ML Runtime to accompany Cohere Toolkit" \
+    ML_RUNTIME_EDITOR="JupyterLab" \
+    ML_RUNTIME_KERNEL="Python 3.11" \
+    ML_RUNTIME_METADATA_VERSION="1" \
+    ML_RUNTIME_SHORT_VERSION="2024.07"
 
 LABEL com.cloudera.ml.runtime.edition=$ML_RUNTIME_EDITION \
-      com.cloudera.ml.runtime.full-version=$ML_RUNTIME_FULL_VERSION \
-      com.cloudera.ml.runtime.short-version=$ML_RUNTIME_SHORT_VERSION \
-      com.cloudera.ml.runtime.maintenance-version=$ML_RUNTIME_MAINTENANCE_VERSION \
-      com.cloudera.ml.runtime.description=$ML_RUNTIME_DESCRIPTION \
-      authors="Cohere"
+    com.cloudera.ml.runtime.full-version=$ML_RUNTIME_FULL_VERSION \
+    com.cloudera.ml.runtime.short-version=$ML_RUNTIME_SHORT_VERSION \
+    com.cloudera.ml.runtime.maintenance-version=$ML_RUNTIME_MAINTENANCE_VERSION \
+    com.cloudera.ml.runtime.description=$ML_RUNTIME_DESCRIPTION \
+    com.cloudera.ml.runtime.editor=$ML_RUNTIME_EDITOR \
+    com.cloudera.ml.runtime.kernel=$ML_RUNTIME_KERNEL \
+    com.cloudera.ml.runtime.runtime-metadata-version=$ML_RUNTIME_METADATA_VERSION \
+    com.cloudera.ml.runtime.short-version=$ML_RUNTIME_SHORT_VERSION \
+    authors="Cloudera"
 
 ENV PG_APP_HOME=/etc/docker-app
 ENV PYTHON_VERSION=3.11.8
