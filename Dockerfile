@@ -1,86 +1,48 @@
-# Base image
+
+# This Dockerfile is intended for One-Click deployment to Google Cloud Run
+# ------------------------------------------------------------------------
 FROM ubuntu:22.04
-# Use Terrarium image
-FROM ghcr.io/cohere-ai/terrarium:latest as terrarium
-# Final stage
-FROM python:3.11
-
+# FROM docker.repository.cloudera.com/cloudera/cdsw/ml-runtime-jupyterlab-python3.11-cuda:2024.05.1-b8
 USER root
+FROM ghcr.io/cohere-ai/terrarium:latest as terrarium
 
-# Set environment variables
-ENV ML_RUNTIME_EDITION="ML Runtime for Cohere Toolkit" \
-    ML_RUNTIME_SHORT_VERSION="1" \
-    ML_RUNTIME_MAINTENANCE_VERSION="7" \
-    ML_RUNTIME_FULL_VERSION="2024.07.7" \
-    ML_RUNTIME_DESCRIPTION="ML Runtime to accompany Cohere Toolkit" \
-    ML_RUNTIME_EDITOR="Cohere Toolkit" \
-    ML_RUNTIME_KERNEL="Python 3.11" \
-    ML_RUNTIME_METADATA_VERSION="1" \
-    ML_RUNTIME_SHORT_VERSION="2024.07" \
-    PG_APP_HOME=/etc/docker-app \
-    PYTHON_VERSION=3.11.8 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING=utf-8 \
-    LANG=C.UTF-8 \
-    PYTHONPATH=/workspace/src/ \
-    VIRTUAL_ENV=/workspace/.venv \
-    PATH="$VIRTUAL_ENV/bin:$PATH" \
-    POETRY_VIRTUALENVS_IN_PROJECT=true
-
-# Install Python and other necessary packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    krb5-user python3.11 python3-pip python-is-python3 ssh xz-utils && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Configure pip to install packages under /usr/local
-RUN pip3 config set install.user false
-
-# Install the Jupyter kernel gateway
-RUN pip3 install "jupyter-kernel-gateway==2.5.2"
-
-# Associate uid and gid 8536 with username cdsw
-RUN addgroup --gid 8536 cdsw && \
-    adduser --disabled-password --gecos "CDSW User" --uid 8536 --gid 8536 cdsw
-
-# Set up Python symlink to /usr/local/bin/python3
-RUN ln -s $(which python) /usr/local/bin/python3
-
-# Configure pip to install packages to /home/cdsw
-RUN echo -e '[install]\nuser = true' > /etc/pip.conf
-
-# # Create a new layer from Python
-# FROM python:3.11
-
-# # Upgrade packages in the base image
-# RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Copy entrypoint script
+FROM python:3.11
+LABEL authors="Cloudera"
+ENV PG_APP_HOME=/etc/docker-app
+ENV PYTHON_VERSION=3.11.8
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONIOENCODING=utf-8
+ENV LANG C.UTF-8
+ENV PYTHONPATH=/workspace/src/
+ENV VIRTUAL_ENV=/workspace/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 COPY docker_scripts/gcp-entrypoint.sh /sbin/gcp-entrypoint.sh
-RUN chmod 755 /sbin/gcp-entrypoint.sh && \
-    curl -sL https://deb.nodesource.com/setup_18.x | bash - && \
-    apt-get update && apt-get install --no-install-recommends -y nginx nodejs && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    npm install -g pnpm pm2
 
-# Copy nginx config
+RUN chmod 755 /sbin/gcp-entrypoint.sh \
+    && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y python-is-python3 nginx nodejs ssh xz-utils krb5-user \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && npm install -g pnpm \
+    &&  npm install -g pm2
+
+# Copy nginx config \
 COPY docker_scripts/nginx.conf /etc/nginx/nginx.conf
 
 WORKDIR /workspace
 
-# Copy dependency files
+# Copy dependency files to avoid cache invalidations
 COPY pyproject.toml poetry.lock ./
 
-# Check Poetry version and Python version
-RUN python3 --version && \
-    pip3 --version && \
-    pip3 install --no-cache-dir poetry==1.6.1 && \
-    poetry --version
-
 # Install dependencies
-RUN poetry config installer.max-workers 10 && \
-    poetry install && \
-    poetry cache clear pypi --all --no-interaction
+RUN pip3 install --no-cache-dir poetry==1.6.1 \
+    && poetry config installer.max-workers 10 \
+    && poetry install \
+    && (poetry cache clear --all --no-interaction PyPI || true) \
+    && (poetry cache clear --all --no-interaction _default_cache || true)
 
 # Copy the rest of the code
 COPY src/backend src/backend
@@ -99,40 +61,94 @@ COPY src/interfaces/coral_web/.env.development .
 COPY src/interfaces/coral_web/.env.production .
 
 ENV NEXT_PUBLIC_API_HOSTNAME='/api'
-RUN npm install && npm run next:build
+RUN npm install \
+    && npm run next:build
 
-# Copy Terrarium files
+# Terrarium
 WORKDIR /usr/src/app
 COPY --from=terrarium /usr/src/app/package*.json ./
-RUN npm install -g ts-node && \
-    npm install && \
-    npm prune --production
+RUN npm install -g ts-node \
+    && npm install \
+    && npm prune --production
 COPY --from=terrarium /usr/src/app/. .
 ENV ENV_RUN_AS "docker"
 
-# Expose ports
+# Ports to expose
 EXPOSE 4000/tcp
 EXPOSE 8000/tcp
 EXPOSE 8090/tcp
-
 ENV CDSW_APP_PORT=4000
 
-# Set entrypoint
 CMD ["/sbin/gcp-entrypoint.sh"]
 
-# Relax permissions to facilitate installation of Cloudera client files at startup
-RUN for i in /bin /opt /usr /usr/lib/hadoop /usr/share/java /workspace; do \
-        mkdir -p ${i}; \
-        chown cdsw ${i}; \
-        chmod +rw ${i}; \
-        find ${i} -type d -exec chown cdsw {} \; -exec chmod +rw {} \; \
-    done && \
-    for i in /etc /usr/lib/hadoop /etc/alternatives /runtime-addons; do \
-        mkdir -p ${i}; \
-        chmod 777 ${i}; \
-    done
+# # Install Python
+# # Note that the package python-is-python3 will alias python3 as python
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#    krb5-user python3.10 python3-pip python-is-python3 ssh xz-utils
+
+# Configure pip to install packages under /usr/local
+# when building the Runtime image
+RUN pip3 config set install.user false
+
+# Install the Jupyter kernel gateway.
+# The IPython kernel is automatically installed 
+# under the name python3,
+# so below we set the kernel name to python3.
+RUN pip3 install "jupyter-kernel-gateway==2.5.2"
+
+# Associate uid and gid 8536 with username cdsw
+RUN \
+  addgroup --gid 8536 cdsw && \
+  adduser --disabled-password --gecos "CDSW User" --uid 8536 --gid 8536 cdsw
+
+# # Set up Python symlink to /usr/local/bin/python3
+# RUN ln -s $(which python) /usr/local/bin/python3
 
 
+# Install any additional packages.
+# apt-get install ...
+# pip install ...
+
+
+# configure pip to install packages to /home/cdsw
+# once the Runtime image is loaded into CML
+# do not install Python packages in the Dockerfile after this line
+RUN /bin/bash -c "echo -e '[install]\nuser = true'" > /etc/pip.conf
+
+
+# Relax permissions to facilitate installation of Cloudera
+# client files at startup
+RUN chown cdsw /
+RUN for i in /bin /var /etc /sbin /home /runtime-addons /opt /usr /tmp /usr/share/java /workspace; do \
+    mkdir -p ${i}; \
+    chown cdsw ${i}; \
+    chmod +rwx ${i}; \
+    for subfolder in `find ${i} -type d` ; do \
+      chown cdsw ${subfolder}; \
+      chmod +rwx ${subfolder}; \
+    done \
+  done
+
+
+RUN for i in /etc /etc/alternatives; do \
+  mkdir -p ${i}; \
+  chmod 777 ${i}; \
+  done
+
+USER cdsw
+
+# Set environment variables
+ENV ML_RUNTIME_EDITION="ML Runtime for Cohere Toolkit" \
+    ML_RUNTIME_SHORT_VERSION="1" \
+    ML_RUNTIME_MAINTENANCE_VERSION="15" \
+    ML_RUNTIME_FULL_VERSION="2024.07.15" \
+    ML_RUNTIME_DESCRIPTION="ML Runtime to accompany Cohere Toolkit" \
+    ML_RUNTIME_EDITOR="Cohere Toolkit" \
+    ML_RUNTIME_KERNEL="Python 3.11" \
+    ML_RUNTIME_JUPYTER_KERNEL_GATEWAY_CMD="/usr/local/bin/jupyter kernelgateway" \
+    ML_RUNTIME_JUPYTER_KERNEL_NAME="python3" \
+    ML_RUNTIME_METADATA_VERSION="1" \
+    ML_RUNTIME_SHORT_VERSION="2024.07"
 
 # Set labels
 LABEL com.cloudera.ml.runtime.edition=$ML_RUNTIME_EDITION \
